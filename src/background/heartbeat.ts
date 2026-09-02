@@ -69,12 +69,23 @@ async function heartbeat(
   // 只保留需要的字段，避免持有完整 Tab 对象（favIconUrl 可能是很大的
   // base64 data URI），长期驻留会导致内存无限增长（上游 #222）。
   const { url, title, audible, incognito } = tab
+
+  // 自身扩展页面（popup/设置页）不发送也不记录，避免打开 popup 时把
+  // 「当前页面」覆盖成内部页，同时不留活性空窗。
+  if (url.startsWith(browser.runtime.getURL(''))) {
+    console.debug('Ignoring heartbeat for our own extension page')
+    return
+  }
+
+  // 仅跟踪 http(s) 页面：chrome:// 新标签页、about:blank 等内部页面仍要发送
+  // 心跳（守护进程靠它判活），但 url 置空，避免产生垃圾页面记录。
+  const trackable = /^https?:\/\//i.test(url)
   const [browserName, instanceId] = await Promise.all([
     getBrowser(),
     getInstanceId(),
   ])
   const heartbeatData = {
-    url: decodeURL(url),
+    url: trackable ? decodeURL(url) : '',
     title,
     audible: audible ?? false,
     incognito,
@@ -84,19 +95,23 @@ async function heartbeat(
     timestamp: new Date().toISOString(),
   }
 
-  console.debug(`Sending heartbeat: ${heartbeatData.url}`)
+  console.debug(`Sending heartbeat: ${heartbeatData.url || '(internal page)'}`)
   // 无论数据是否变化都要发送：守护进程依赖心跳判活（120s 静默即断连），
   // 长时间停留在同一页面时绝不能静默。
   const ok = await sendHeartbeat(client, heartbeatData)
   if (ok) {
     setBadge('ok')
-    await setHeartbeatData({
-      url: heartbeatData.url,
-      title: heartbeatData.title,
-      audible: heartbeatData.audible,
-      incognito: heartbeatData.incognito,
-      tabCount: heartbeatData.tabCount,
-    })
+    // 仅记录可跟踪页面：内部页面（about:blank / chrome:// 等）只用于向守护
+    // 进程保活，不覆盖「当前页面」展示数据。
+    if (trackable) {
+      await setHeartbeatData({
+        url: heartbeatData.url,
+        title: heartbeatData.title,
+        audible: heartbeatData.audible,
+        incognito: heartbeatData.incognito,
+        tabCount: heartbeatData.tabCount,
+      })
+    }
     await updateHeartbeatStats({ increment: true, resetError: true })
   } else {
     setBadge('error')

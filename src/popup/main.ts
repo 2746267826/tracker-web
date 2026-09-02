@@ -68,14 +68,15 @@ async function renderStatus() {
       : ''
   }
 
-  // Current tab
+  // Current tab（仅存储可跟踪页面；内部页面心跳不上屏）
   const titleEl = document.getElementById('current-title')
   const urlEl = document.getElementById('current-url')
   if (titleEl && urlEl) {
-    titleEl.innerText = heartbeatData?.title ?? '–'
-    urlEl.innerText = heartbeatData?.url ?? ''
+    const currentUrl = heartbeatData?.url ?? ''
+    titleEl.innerText = heartbeatData?.title ?? '暂无记录'
+    urlEl.innerText = currentUrl
     titleEl.title = heartbeatData?.title ?? ''
-    urlEl.title = heartbeatData?.url ?? ''
+    urlEl.title = currentUrl
   }
 
   // Testing
