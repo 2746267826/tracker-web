@@ -1,24 +1,30 @@
 {
     "type": "module",
-    "name": "aw-watcher-web",
+    "name": "pim-watcher-web",
+    "displayName": "PIM 浏览器记录",
     "license": "MPL-2.0",
+    "version": "1.0.0",
+    "description": "记录当前浏览的网页，供 PIM「电脑记录」使用 / Track the current tab for PIM PC activity",
     "bugs": {
-        "url": "https://github.com/ActivityWatch/aw-watcher-web/issues"
+        "url": "https://github.com/2746267826/tracker-web/issues"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/ActivityWatch/aw-watcher-web.git"
+        "url": "git+https://github.com/2746267826/tracker-web.git"
+    },
+    "scripts": {
+        "compile": "tsc --noEmit",
+        "build": "vite build",
+        "build:firefox": "cross-env VITE_TARGET_BROWSER=firefox vite build"
     },
     "dependencies": {
-        "aw-client": "git+https://github.com/ActivityWatch/aw-client-js.git#6093fbb10c2721510515c93ae7f85b9bc6210eda",
-        "deep-equal": "^2.2.3",
         "p-retry": "^6.2.1",
         "punycode.js": "^2.3.1",
         "webextension-polyfill": "^0.12.0"
     },
     "devDependencies": {
-        "@types/deep-equal": "^1.0.4",
         "@types/webextension-polyfill": "^0.12.1",
+        "cross-env": "^10.1.0",
         "prettier": "^3.4.2",
         "typescript": "^5.7.3",
         "vite": "^8.0.16",

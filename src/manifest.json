@@ -3,31 +3,33 @@
     "{{firefox}}.manifest_version": 2,
     "{{safari}}.manifest_version": 3,
 
-    "name": "ActivityWatch Web Watcher",
-    "description": "Log the current tab and your browser activity with ActivityWatch.",
-    "version": "0.5.3",
+    "name": "PIM 浏览器记录",
+    "description": "记录当前浏览的网页，供 PIM「电脑记录」使用。",
+    "version": "1.0.0",
     "icons": {
-        "128": "logo-128.png"
+        "128": "media/logo/logo-128.png"
     },
 
     "{{chrome}}.action": {
-        "default_icon": { "128": "logo-128.png" },
+        "default_icon": { "128": "media/logo/logo-128.png" },
         "default_popup": "src/popup/index.html"
     },
     "{{firefox}}.browser_action": {
-        "default_icon": "logo-128.png",
+        "default_icon": "media/logo/logo-128.png",
         "default_popup": "src/popup/index.html"
     },
     "{{safari}}.action": {
-        "default_icon": { "128": "logo-128.png" },
+        "default_icon": { "128": "media/logo/logo-128.png" },
         "default_popup": "src/popup/index.html"
     },
 
     "background": {
         "{{chrome}}.service_worker": "src/background/main.ts",
+        "{{chrome}}.type": "module",
         "{{firefox}}.scripts": ["src/background/main.ts"],
         "{{firefox}}.persistent": true,
-        "{{safari}}.service_worker": "src/background/main.ts"
+        "{{safari}}.service_worker": "src/background/main.ts",
+        "{{safari}}.type": "module"
     },
 
     "options_ui": {
@@ -40,8 +42,9 @@
         "notifications",
         "activeTab",
         "storage",
-        "http://127.0.0.1:5600/api/*",
-        "http://127.0.0.1:5666/api/*"
+        "http://localhost:15601/*",
+        "http://127.0.0.1:15601/*",
+        "<all_urls>"
     ],
     "{{chrome}}.permissions": [
         "tabs",

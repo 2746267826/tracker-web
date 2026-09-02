@@ -1,6 +1,5 @@
 import browser from 'webextension-polyfill'
-import { FetchError } from 'aw-client'
-import { getBrowserName, setBrowserName } from '../storage'
+import { appendLog, getBrowserName, setBrowserName } from '../storage'
 
 export const getTab = (id: number) => browser.tabs.get(id)
 export const getTabs = (query: browser.Tabs.QueryQueryInfoType = {}) =>
@@ -36,7 +35,7 @@ export const getActiveWindowTab = async (): Promise<
 export function emitNotification(title: string, message: string) {
   browser.notifications.create({
     type: 'basic',
-    iconUrl: browser.runtime.getURL('logo-128.png'),
+    iconUrl: browser.runtime.getURL('media/logo/logo-128.png'),
     title,
     message,
   })
@@ -54,9 +53,11 @@ export const getBrowser = async (): Promise<string> => {
   return browserName
 }
 
-// FIXME: Detect Vivaldi? It seems to be intentionally impossible
 export const detectBrowser = () => {
-  if ((navigator as any).brave?.isBrave()) {
+  // Edge 的 UA 同样包含 Chrome，必须先判断 Edg/
+  if (navigator.userAgent.includes('Edg/')) {
+    return 'edge'
+  } else if ((navigator as any).brave?.isBrave?.()) {
     return 'brave'
   } else if (
     navigator.userAgent.includes('Opera') ||
@@ -70,21 +71,40 @@ export const detectBrowser = () => {
   } else if (navigator.userAgent.includes('Safari')) {
     return 'safari'
   } else {
-    return 'unknown'
+    return 'other'
   }
 }
 
-export async function logHttpError<T extends Error>(error: T) {
-  if (error instanceof FetchError) {
-    return error.response
-      .json()
-      .then((data) =>
-        console.error(
-          `Status code: ${error.response.status}, response: ${data.message}`,
-        ),
-      )
-      .catch(() => console.error(`Status code: ${error.response.status}`))
-  } else {
-    console.error('Unexpected error', error)
+export async function logHttpError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error('HTTP error:', message)
+  await appendLog('error', `HTTP 错误: ${message}`)
+}
+
+// 工具栏角标：ok=绿√（正常上报），error=红×（上报失败），off=灰「停」（已停用）
+// Chrome MV3 使用 chrome.action，Firefox MV2 只有 browser.browserAction。
+type BadgeState = 'ok' | 'error' | 'off'
+function getActionApi(): any {
+  const g = globalThis as any
+  if (g.chrome?.action) return g.chrome.action
+  if ((browser as any).browserAction) return (browser as any).browserAction
+  return (browser as any).action
+}
+export function setBadge(state: BadgeState) {
+  try {
+    const action = getActionApi()
+    if (!action) return
+    if (state === 'ok') {
+      action.setBadgeBackgroundColor({ color: '#1A9C5B' })
+      action.setBadgeText({ text: '√' })
+    } else if (state === 'error') {
+      action.setBadgeBackgroundColor({ color: '#D93025' })
+      action.setBadgeText({ text: '×' })
+    } else {
+      action.setBadgeBackgroundColor({ color: '#9AA0A6' })
+      action.setBadgeText({ text: '停' })
+    }
+  } catch (e) {
+    console.warn('Failed to update badge', e)
   }
 }

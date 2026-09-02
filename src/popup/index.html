@@ -1,7 +1,7 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
-    <title>ActivityWatch Popup</title>
+    <title>PIM 浏览器记录</title>
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,88 +9,92 @@
     <link rel="icon" href="/media/logo/logo-128.png" type="image/png" />
   </head>
   <body>
-    <img src="/media/banners/banner.png" style="width: 100%" />
-
-    <hr />
+    <div id="header">
+      <img src="/media/logo/logo-128.png" alt="PIM" />
+      <span id="header-title">PIM 浏览器记录</span>
+    </div>
 
     <div id="testing-notice">
       <!-- Filled by JS -->
     </div>
 
-    <div>
-      <a id="webui-link" href="http://localhost:5600/" target="_blank">
-        <span class="button">
-          <b>Open web UI</b>
-        </span>
+    <div id="tabs">
+      <button id="tab-status" class="tab active">状态</button>
+      <button id="tab-logs" class="tab">日志</button>
+      <span class="spacer"></span>
+      <button id="check-now-btn" class="mini" title="立即检测与守护进程的连接">
+        立即检测
+      </button>
+      <a id="webui-link" href="#" target="_blank" title="打开 PIM 网页">
+        <span class="button">打开 PIM</span>
       </a>
-      <a href="https://forum.activitywatch.net/" target="_blank">
-        <span class="button">
-          <b>Visit forum</b>
-        </span>
-      </a>
-      <a id="settings-btn" href="#" title="Settings">
-        <span class="button">
-          <b>⚙</b>
-        </span>
+      <a id="settings-btn" href="#" title="设置">
+        <span class="button">⚙ 设置</span>
       </a>
     </div>
 
-    <table>
-      <tr>
-        <th align="right">Enabled:</th>
-        <td>
-          <input type="checkbox" id="status-enabled-checkbox" />
-        </td>
-        <td>
-          <button id="status-consent-btn" class="button">
-            Consent to Privacy Notice
-          </button>
-        </td>
-      </tr>
+    <div id="panel-status">
+      <table>
+        <tr>
+          <th align="right">已启用：</th>
+          <td>
+            <input type="checkbox" id="status-enabled-checkbox" />
+          </td>
+        </tr>
 
-      <tr>
-        <th align="right">Connected:</th>
-        <td id="status-connected-icon">
-          <!-- Filled by JS -->
-        </td>
-      </tr>
-
-      <tr align="right">
-        <th>Last sync:</th>
-        <td id="status-last-sync">
-          <!-- Filled by JS -->
-        </td>
-      </tr>
-
-      <tr>
-        <th align="right">Browser:</th>
-        <td>
-          <code id="status-browser">
+        <tr>
+          <th align="right">守护进程：</th>
+          <td id="status-connected-icon">
             <!-- Filled by JS -->
-          </code>
-        </td>
-      </tr>
+          </td>
+        </tr>
 
-      <tr>
-        <th align="right">Hostname:</th>
-        <td>
-          <code id="status-hostname">
+        <tr>
+          <th align="right">最近上报：</th>
+          <td id="status-last-sync">
             <!-- Filled by JS -->
-          </code>
-        </td>
-      </tr>
-    </table>
+          </td>
+        </tr>
+
+        <tr>
+          <th align="right">今日心跳：</th>
+          <td>
+            <span id="status-today-count">–</span> 次
+            <span id="status-last-error" class="error-text"></span>
+          </td>
+        </tr>
+
+        <tr>
+          <th align="right">当前页面：</th>
+          <td>
+            <div id="current-title" class="truncate">–</div>
+            <div id="current-url" class="truncate url"></div>
+          </td>
+        </tr>
+
+        <tr>
+          <th align="right">浏览器：</th>
+          <td>
+            <code id="status-browser"><!-- Filled by JS --></code>
+            <code id="status-instance"><!-- Filled by JS --></code>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <div id="panel-logs" style="display: none">
+      <ul id="log-list">
+        <!-- Filled by JS -->
+      </ul>
+      <button id="clear-logs-btn" class="mini">清空日志</button>
+    </div>
 
     <hr />
 
     <small>
       <p>
-        If you find any bugs with this watcher, please report them
-        <a
-          href="https://github.com/ActivityWatch/aw-watcher-web/issues"
-          target="_blank"
-          >here</a
-        >.
+        数据仅发送到本机 PIM 守护进程。若显示未连接，请先启动 PIM
+        客户端，再点击「立即检测」。
       </p>
     </small>
     <script type="module" src="./main.ts"></script>

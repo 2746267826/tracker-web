@@ -2,98 +2,117 @@ name: Build
 
 on:
   push:
-    branches: [master]
+    branches: ['**']
+    tags: ['v*']
   pull_request:
-    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          fetch-depth: 0
 
-      - name: Use Node.js 23.x
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v4
         with:
-          node-version: 23.x
+          node-version: 22.x
           cache: npm
 
-      - name: Build Firefox
-        run: make build-firefox
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: firefox
-          path: artifacts/firefox.zip
-      - name: Check reproducibility from src-zip
-        run: make test-reproducibility-firefox
-
-      - name: Build Chrome
-        run: make build-chrome
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: chrome
-          path: artifacts/chrome.zip
-      - name: Check reproducibility from src-zip
-        run: make test-reproducibility-chrome
-  build-safari:
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Build Safari
-        run: make build-safari
-
-      - name: Check reproducibility from src-zip
-        run: make test-reproducibility-safari
-
-      - name: Convert Chrome Extension to Safari
+      - name: Resolve version
+        id: ver
         run: |
-          xcrun safari-web-extension-converter ./build \
-            --project-location . \
-            --bundle-identifier net.activitywatch.activitywatchwebwatcher \
-            --macos-only \
-            --force
-
-      - name: Build Xcode Project
-        run: |
-          xcodebuild -project "ActivityWatch Web Watcher/ActivityWatch Web Watcher.xcodeproj" -list
-          xcodebuild -project "ActivityWatch Web Watcher/ActivityWatch Web Watcher.xcodeproj" \
-                     -scheme "ActivityWatch Web Watcher" \
-                     -configuration Release \
-                     clean build
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: safari
-          path: |
-            ~/Library/Developer/Xcode/DerivedData/**/Build/Products/Release/
-            artifacts/safari.zip
-  typecheck:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Use Node.js 23.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: 23.x
-          cache: npm
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        run: make install
+        run: npm ci
 
       - name: Typecheck TypeScript
-        run: make compile
+        run: npm run compile
+
+      - name: Build Chrome
+        run: npm run build
+
+      # 回归守卫：历史上因 manifest 缺少 <all_urls> host_permissions 或
+      # service worker type:module 导致插件完全失效（pim-platform PR #183/#184），
+      # 这里对产物做硬校验，防止同类缺陷再次发布。
+      - name: Verify build output
+        run: |
+          test -f build/manifest.json || { echo "manifest.json missing"; exit 1; }
+          test -f build/src/background/main.js || { echo "background/main.js missing"; exit 1; }
+          test -f build/src/popup/index.html || { echo "popup missing"; exit 1; }
+          test -f build/src/settings/index.html || { echo "settings missing"; exit 1; }
+          test -f build/media/logo/logo-128.png || { echo "logo missing"; exit 1; }
+          grep -q '<all_urls>' build/manifest.json || { echo "host_permissions <all_urls> missing (cf. PR #184 regression)"; exit 1; }
+          node -e "const m=require('./build/manifest.json'); if(m.manifest_version!==3||!m.action?.default_popup||!m.options_ui?.page){console.error('manifest incomplete',m);process.exit(1)}"
+          echo "Build output OK"
+
+      - name: Zip
+        run: |
+          mkdir -p artifacts
+          cd build && zip -FS -r "../artifacts/pim-browser-extension-v${{ steps.ver.outputs.version }}.zip" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pim-browser-extension-v${{ steps.ver.outputs.version }}
+          path: artifacts/*.zip
+
+  release:
+    # 打 tag 时发布 fork Release 并触发 pim-platform 重新打包安装器
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pim-browser-extension-v${{ needs.build.outputs.version }}
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="$(git tag -l --format='%(contents)' "$TAG" | sed '/^$/d')"
+          if [ -z "$NOTES" ]; then
+            NOTES="PIM 浏览器记录 v${{ needs.build.outputs.version }}
+
+          变更见提交历史。安装：解压后在 chrome://extensions 以「加载已解压的扩展程序」载入。"
+          fi
+          gh release create "$TAG" artifacts/*.zip --title "$TAG" --notes "$NOTES" --repo "$GITHUB_REPOSITORY"
+
+      - name: Dispatch pim-platform installer build
+        # 跨仓库 repository_dispatch 必须使用 PAT；secret 未配置时跳过并告警，
+        # 不阻塞 fork 自身发版。
+        env:
+          GH_TOKEN: ${{ secrets.PIM_DISPATCH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::PIM_DISPATCH_PAT secret is not configured; skipping pim-platform dispatch"
+            exit 0
+          fi
+          NOTES="$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" | sed '/^$/d')"
+          jq -n --arg tag "${GITHUB_REF_NAME}" --arg ver "${{ needs.build.outputs.version }}" --arg notes "$NOTES" \
+            '{event_type: "browser-extension-release", client_payload: {repo: env.GITHUB_REPOSITORY, tag: $tag, version: $ver, release_notes: $notes}}' \
+            > payload.json
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/2746267826/pim-platform/dispatches \
+            -d @payload.json \
+            && echo "Dispatched pim-platform installer build for ${GITHUB_REF_NAME}"

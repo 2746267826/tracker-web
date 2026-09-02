@@ -17,15 +17,14 @@ export default defineConfig({
     minify: false,
     outDir: 'build',
   },
+  // public/media/... 会被原样拷贝进构建产物，manifest 与 popup 均按
+  // /media/... 路径引用。
   plugins: [
     webExtension({
       manifest: generateManifest,
-      additionalInputs: [
-        'src/consent/index.html',
-        'src/consent/main.ts',
-        'src/offscreen.html',
-      ],
-      browser: process.env.VITE_TARGET_BROWSER,
+      additionalInputs: ['src/offscreen.html'],
+      // Chrome is the default target so a plain `vite build` works on any OS.
+      browser: process.env.VITE_TARGET_BROWSER ?? 'chrome',
     }),
   ],
 })
