@@ -1,10 +1,20 @@
 import browser from 'webextension-polyfill'
-import { getActiveWindowTab, getTab, getTabs } from './helpers'
+import {
+  getActiveWindowTab,
+  getBrowser,
+  getTab,
+  getTabs,
+  setBadge,
+} from './helpers'
 import config from '../config'
-import { AWClient, IEvent } from 'aw-client'
-import { getBucketId, sendHeartbeat } from './client'
-import { getEnabled, getHeartbeatData, setHeartbeatData } from '../storage'
-import deepEqual from 'deep-equal'
+import { PimClient, sendHeartbeat } from './client'
+import {
+  appendLog,
+  getEnabled,
+  getInstanceId,
+  setHeartbeatData,
+  updateHeartbeatStats,
+} from '../storage'
 import * as punycode from 'punycode.js'
 
 function decodeURL(url: string): string {
@@ -32,28 +42,17 @@ function decodeURL(url: string): string {
   }
 }
 
-function formatHeartbeatLogData(data: IEvent['data']) {
-  return Object.entries(data)
-    .map(([key, value]) => {
-      const formattedValue =
-        typeof value === 'string'
-          ? JSON.stringify(value)
-          : value === undefined
-            ? 'undefined'
-            : JSON.stringify(value)
-      return `${key}=${formattedValue}`
-    })
-    .join(', ')
-}
-
+// 上报协议与 PIM 守护进程 BrowserBridgeService 的 JSON 契约保持一致：
+// { url, title, audible, incognito, tabCount, timestamp, browser, instanceId }
 async function heartbeat(
-  client: AWClient,
+  client: PimClient,
   tab: browser.Tabs.Tab | undefined,
   tabCount: number,
 ) {
   const enabled = await getEnabled()
   if (!enabled) {
     console.warn('Ignoring heartbeat because client has not been enabled')
+    setBadge('off')
     return
   }
 
@@ -67,44 +66,49 @@ async function heartbeat(
     return
   }
 
-  // Extract only the fields we need so we don't retain references to the
-  // full Tab object (which includes favIconUrl — a potentially large base64
-  // data URI).  Over thousands of heartbeats the retained Tab references
-  // cause unbounded memory growth (see #222).
+  // 只保留需要的字段，避免持有完整 Tab 对象（favIconUrl 可能是很大的
+  // base64 data URI），长期驻留会导致内存无限增长（上游 #222）。
   const { url, title, audible, incognito } = tab
-  const now = new Date()
-  const data: IEvent['data'] = {
+  const [browserName, instanceId] = await Promise.all([
+    getBrowser(),
+    getInstanceId(),
+  ])
+  const heartbeatData = {
     url: decodeURL(url),
     title,
     audible: audible ?? false,
     incognito,
-    tabCount: tabCount,
+    tabCount,
+    browser: browserName,
+    instanceId,
+    timestamp: new Date().toISOString(),
   }
-  const previousData = await getHeartbeatData()
-  if (previousData && !deepEqual(previousData, data)) {
-    console.debug(
-      `Sending heartbeat for previous data: ${formatHeartbeatLogData(previousData)}`,
-    )
-    await sendHeartbeat(
-      client,
-      await getBucketId(),
-      new Date(now.getTime() - 1),
-      previousData,
-      config.heartbeat.intervalInSeconds + 20,
-    )
+
+  console.debug(`Sending heartbeat: ${heartbeatData.url}`)
+  // 无论数据是否变化都要发送：守护进程依赖心跳判活（120s 静默即断连），
+  // 长时间停留在同一页面时绝不能静默。
+  const ok = await sendHeartbeat(client, heartbeatData)
+  if (ok) {
+    setBadge('ok')
+    await setHeartbeatData({
+      url: heartbeatData.url,
+      title: heartbeatData.title,
+      audible: heartbeatData.audible,
+      incognito: heartbeatData.incognito,
+      tabCount: heartbeatData.tabCount,
+    })
+    await updateHeartbeatStats({ increment: true, resetError: true })
+  } else {
+    setBadge('error')
+    await updateHeartbeatStats({
+      lastErrorAt: new Date().toISOString(),
+      lastErrorMessage: '心跳上报失败，PIM 客户端可能未运行',
+    })
+    await appendLog('error', '心跳上报失败，PIM 客户端可能未运行')
   }
-  console.debug(`Sending heartbeat: ${formatHeartbeatLogData(data)}`)
-  await sendHeartbeat(
-    client,
-    await getBucketId(),
-    now,
-    data,
-    config.heartbeat.intervalInSeconds + 20,
-  )
-  await setHeartbeatData(data)
 }
 
-export const sendInitialHeartbeat = async (client: AWClient) => {
+export const sendInitialHeartbeat = async (client: PimClient) => {
   const activeWindowTab = await getActiveWindowTab()
   const tabs = await getTabs()
   console.debug('Sending initial heartbeat', activeWindowTab?.url)
@@ -112,7 +116,7 @@ export const sendInitialHeartbeat = async (client: AWClient) => {
 }
 
 export const heartbeatAlarmListener =
-  (client: AWClient) => async (alarm: browser.Alarms.Alarm) => {
+  (client: PimClient) => async (alarm: browser.Alarms.Alarm) => {
     if (alarm.name !== config.heartbeat.alarmName) return
     const activeWindowTab = await getActiveWindowTab()
     if (!activeWindowTab) return
@@ -122,10 +126,10 @@ export const heartbeatAlarmListener =
   }
 
 export const tabActivatedListener =
-  (client: AWClient) =>
+  (client: PimClient) =>
   async (activeInfo: browser.Tabs.OnActivatedActiveInfoType) => {
     const tab = await getTab(activeInfo.tabId)
     const tabs = await getTabs()
-    console.debug('Sending heartbeat for tab activation', tab.url)
+    console.debug('Sending heartbeat for tab activation', tab?.url)
     await heartbeat(client, tab, tabs.length)
   }

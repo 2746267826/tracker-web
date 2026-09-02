@@ -1,120 +1,94 @@
 import config from '../config'
-
-import { AWClient, IEvent } from 'aw-client'
 import retry from 'p-retry'
-import { emitNotification, getBrowser, logHttpError } from './helpers'
-import {
-  getApiKey,
-  getHostname,
-  getSyncStatus,
-  setSyncStatus,
-} from '../storage'
+import { emitNotification, logHttpError } from './helpers'
+import { getBaseUrl, getSyncStatus, setSyncStatus, appendLog } from '../storage'
 
-export const getClient = () =>
-  new AWClient('aw-client-web', { testing: config.isDevelopment })
+// PIM 守护进程本地桥接客户端。
+// 协议：GET /browser/ping 探活；POST /browser/heartbeat 上报当前标签页。
+export class PimClient {
+  baseURL: string
 
-export const loadApiKey = async (client: AWClient) => {
-  client.token = await getApiKey()
+  constructor(baseURL?: string) {
+    this.baseURL = (baseURL ?? config.daemon.defaultBaseUrl).replace(/\/+$/, '')
+  }
+
+  async ping(): Promise<void> {
+    const res = await fetch(`${this.baseURL}${config.daemon.pingPath}`)
+    if (!res.ok) {
+      throw new Error(`PIM daemon ping failed with status ${res.status}`)
+    }
+  }
+
+  async sendHeartbeat(heartbeat: {
+    url: string
+    title: string
+    audible: boolean
+    incognito: boolean
+    tabCount: number
+    browser: string
+    instanceId: string
+    timestamp: string
+  }): Promise<void> {
+    const res = await fetch(`${this.baseURL}${config.daemon.heartbeatPath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(heartbeat),
+    })
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`PIM daemon heartbeat failed with status ${res.status}`)
+    }
+  }
 }
 
-// TODO: We might want to get the hostname somehow, maybe like this:
-// https://stackoverflow.com/questions/28223087/how-can-i-allow-firefox-or-chrome-to-read-a-pcs-hostname-or-other-assignable
-export function ensureBucket(
-  client: AWClient,
-  bucketId: string,
-  hostname: string,
-) {
-  return retry(
-    () =>
-      client
-        .ensureBucket(bucketId, 'web.tab.current', hostname)
-        .catch((err) => {
-          console.error('Failed to create bucket, retrying...')
-          logHttpError(err)
-          return Promise.reject(err)
-        }),
-    { forever: true, minTimeout: 500 },
-  )
+export const getClient = async (): Promise<PimClient> =>
+  new PimClient(await getBaseUrl())
+
+// 连接状态在成功/失败之间切换时给出系统通知，平时保持安静。
+async function reportSyncResult(success: boolean, error?: unknown) {
+  const syncStatus = await getSyncStatus()
+  if (success) {
+    if (syncStatus.success === false) {
+      emitNotification('已重新连接 PIM', '浏览器记录恢复上报')
+      await appendLog('info', '重新连接 PIM 守护进程')
+    }
+    await setSyncStatus(true)
+  } else {
+    if (syncStatus.success !== false) {
+      emitNotification('无法连接 PIM 守护进程', '请确认 PIM 客户端正在运行')
+      await appendLog(
+        'error',
+        `连接 PIM 守护进程失败，请确认 PIM 客户端正在运行：${String(error)}`,
+      )
+    }
+    await setSyncStatus(false)
+    await logHttpError(error)
+  }
 }
 
-export async function detectHostname(client: AWClient) {
-  console.debug('Attempting to detect hostname from server...')
-  return retry(
-    () => {
-      console.debug('Making request to server for hostname...')
-      return client.getInfo()
-    },
-    {
-      retries: 3,
-      onFailedAttempt: (error) => {
-        console.warn(
-          `Failed to detect hostname (attempt ${error.attemptNumber}/${
-            error.retriesLeft + error.attemptNumber
-          }):`,
-          error.message,
-        )
-      },
-    },
-  )
-    .then((info) => {
-      console.info('Successfully detected hostname:', info.hostname)
-      return info.hostname
-    })
-    .catch((err) => {
-      console.error('All attempts to detect hostname failed:', err)
-      return undefined
-    })
+export async function checkConnection(client: PimClient): Promise<boolean> {
+  try {
+    await retry(() => client.ping(), { retries: 2, minTimeout: 500 })
+    await reportSyncResult(true)
+    return true
+  } catch (err) {
+    await reportSyncResult(false, err)
+    return false
+  }
 }
 
 export async function sendHeartbeat(
-  client: AWClient,
-  bucketId: string,
-  timestamp: Date,
-  data: IEvent['data'],
-  pulsetime: number,
-) {
-  const hostname = (await getHostname()) ?? 'unknown'
-  const syncStatus = await getSyncStatus()
-  return retry(
-    () =>
-      client.heartbeat(bucketId, pulsetime, {
-        data,
-        duration: 0,
-        timestamp,
-      }),
-    {
-      retries: 3,
-      onFailedAttempt: () =>
-        ensureBucket(client, bucketId, hostname).then(() => {}),
-    },
-  )
-    .then(() => {
-      if (syncStatus.success === false) {
-        emitNotification(
-          'Now connected again',
-          'Connection to ActivityWatch server established again',
-        )
-      }
-      setSyncStatus(true)
+  client: PimClient,
+  heartbeat: Parameters<PimClient['sendHeartbeat']>[0],
+): Promise<boolean> {
+  try {
+    await retry(() => client.sendHeartbeat(heartbeat), {
+      retries: 2,
+      minTimeout: 500,
     })
-    .catch((err) => {
-      if (syncStatus.success) {
-        emitNotification(
-          'Unable to send event to server',
-          'Please ensure that ActivityWatch is running',
-        )
-      }
-      setSyncStatus(false)
-      return logHttpError(err)
-    })
-}
-
-export const getBucketId = async (): Promise<string> => {
-  const browser = await getBrowser()
-  const hostname = await getHostname()
-  if (hostname !== undefined) {
-    return `aw-watcher-web-${browser}_${hostname}`
-  } else {
-    return `aw-watcher-web-${browser}`
+    await reportSyncResult(true)
+    return true
+  } catch (err) {
+    await reportSyncResult(false, err)
+    return false
   }
 }

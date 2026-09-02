@@ -1,31 +1,58 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>ActivityWatch settings</title>
+    <title>PIM 浏览器记录 · 设置</title>
     <link href="./style.css" rel="stylesheet" type="text/css" />
   </head>
 
   <body>
+    <h1>PIM 浏览器记录 · 设置</h1>
+
     <form>
       <div>
+        <label for="baseUrl">
+          <strong>守护进程地址：</strong>
+        </label>
+
+        <input
+          type="text"
+          id="baseUrl"
+          name="baseUrl"
+          required
+          placeholder="http://localhost:15601"
+        />
+        <small>本机 PIM 客户端的心跳桥接地址，通常无需修改。</small>
+      </div>
+
+      <div>
+        <label for="webUrl">
+          <strong>PIM 网页地址：</strong>
+        </label>
+
+        <input
+          type="text"
+          id="webUrl"
+          name="webUrl"
+          placeholder="http://127.0.0.1:5858"
+        />
+        <small>弹窗中「打开 PIM」按钮的跳转地址，可留空。</small>
+      </div>
+
+      <div>
         <label for="browser">
-          <strong>Browser:</strong>
+          <strong>浏览器名称：</strong>
         </label>
 
         <select id="browser" name="browser">
+          <option value="">自动检测</option>
           <option value="chrome">Chrome</option>
+          <option value="edge">Edge</option>
           <option value="firefox">Firefox</option>
           <option value="safari">Safari</option>
           <option value="opera">Opera</option>
           <option value="brave">Brave</option>
-          <option value="edge">Edge</option>
-          <option value="arc">Arc</option>
-          <option value="vivaldi">Vivaldi</option>
-          <option value="orion">Orion</option>
-          <option value="yandex">Yandex</option>
-          <option value="zen">Zen</option>
-          <option value="other">Other...</option>
+          <option value="other">其他…</option>
         </select>
 
         <input
@@ -33,43 +60,14 @@
           id="customBrowser"
           name="customBrowser"
           pattern="[a-z]*"
-          placeholder="Custom browser name"
+          placeholder="自定义名称（小写）"
         />
+        <small>显示在 PIM 电脑记录里，用于区分不同浏览器。</small>
       </div>
 
       <div>
-        <label for="hostname">
-          <strong>Hostname:</strong>
-        </label>
-
-        <input
-          type="text"
-          id="hostname"
-          name="hostname"
-          pattern="[a-zA-Z0-9_.\-]*"
-          required
-        />
-      </div>
-
-      <div>
-        <label for="apiKey">
-          <strong>API Key:</strong>
-        </label>
-
-        <input
-          type="password"
-          id="apiKey"
-          name="apiKey"
-          placeholder="Leave blank if auth is disabled"
-        />
-        <small
-          >Found in <code>aw-server-rust/config.toml</code> under
-          <code>[auth] api_key</code></small
-        >
-      </div>
-
-      <div>
-        <button type="submit">Save</button>
+        <button type="submit">保存</button>
+        <span id="save-hint"></span>
       </div>
     </form>
 

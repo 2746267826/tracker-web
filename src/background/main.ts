@@ -5,84 +5,52 @@ import {
   sendInitialHeartbeat,
   tabActivatedListener,
 } from './heartbeat'
-import { getClient, detectHostname, loadApiKey } from './client'
+import { getClient } from './client'
+import { getBrowser } from './helpers'
 import {
-  getConsentStatus,
-  getHostname,
-  setBaseUrl,
-  setConsentStatus,
+  appendLog,
+  getInstanceId,
   setEnabled,
-  setHostname,
   waitForEnabled,
 } from '../storage'
-
-async function getIsConsentRequired() {
-  if (!config.requireConsent) return false
-  return browser.storage.managed
-    .get('consentOfflineDataCollection')
-    .then((consentOfflineDataCollection) => !consentOfflineDataCollection)
-    .catch(() => true)
-}
-
-async function autodetectHostname(client: ReturnType<typeof getClient>) {
-  const hostname = await getHostname()
-  if (hostname === undefined) {
-    const detectedHostname = await detectHostname(client)
-    if (detectedHostname !== undefined) {
-      setHostname(detectedHostname)
-    }
-  }
-}
 
 /** Init */
 console.info('Starting...')
 
 console.debug('Creating client')
-const client = getClient()
-const clientReady = loadApiKey(client)
+// getClient 需要读取用户配置的守护进程地址，异步构造
+const clientReady = getClient()
 
 browser.runtime.onInstalled.addListener(async () => {
-  const { consent } = await getConsentStatus()
-  const isConsentRequired = await getIsConsentRequired()
-  if (!isConsentRequired || consent) {
-    if (!isConsentRequired) console.info('Consent is not required')
-    else if (consent) console.info('Consent required but already accepted')
-    console.debug('Enabling the extension')
-    await setEnabled(true)
-  } else {
-    console.info('Consent is required...opening consent tab')
-    await setConsentStatus({ consent, required: true })
-    await browser.tabs.create({
-      active: true,
-      url: browser.runtime.getURL('src/consent/index.html'),
-    })
-  }
-
-  await clientReady
-  await autodetectHostname(client)
+  console.debug('Enabling the extension on install')
+  await setEnabled(true)
+  // 确保本实例拥有稳定的 instanceId（守护进程据此区分多浏览器/多窗口）
+  await getInstanceId()
+  const browserName = await getBrowser()
+  await appendLog('info', `扩展已安装（${browserName}）`)
 })
 
 console.debug('Creating alarms and tab listeners')
 browser.alarms.create(config.heartbeat.alarmName, {
-  periodInMinutes: Math.floor(config.heartbeat.intervalInSeconds / 60),
+  periodInMinutes: Math.max(
+    1,
+    Math.floor(config.heartbeat.intervalInSeconds / 60),
+  ),
 })
 browser.alarms.onAlarm.addListener(async (alarm) => {
-  await clientReady
+  const client = await clientReady
   return heartbeatAlarmListener(client)(alarm)
 })
 browser.tabs.onActivated.addListener(async (activeInfo) => {
-  await clientReady
+  const client = await clientReady
   return tabActivatedListener(client)(activeInfo)
 })
 
-console.debug('Setting base url')
+console.debug('Waiting for enable before sending initial heartbeat')
 clientReady
-  .then(() => setBaseUrl(client.baseURL))
-  .then(() =>
-    console.debug('Waiting for enable before sending initial heartbeat'),
-  )
-  .then(waitForEnabled)
-  .then(() => sendInitialHeartbeat(client))
+  .then(() => waitForEnabled())
+  .then(() => clientReady)
+  .then((client) => sendInitialHeartbeat(client))
   .then(() => console.info('Started successfully'))
   .catch((err) => console.error('Failed to initialize extension:', err))
 
